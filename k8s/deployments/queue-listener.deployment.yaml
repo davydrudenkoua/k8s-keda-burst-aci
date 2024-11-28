@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name:  queue-listener
+  labels:
+    app:  queue-listener
+spec:
+  selector:
+    matchLabels:
+      app: queue-listener
+  template:
+    metadata:
+      labels:
+        app:  queue-listener
+        azure.workload.identity/use: "true"
+    spec:
+      serviceAccountName: {{SERVICE_ACCOUNT_NAME}}
+      containers:
+      - name:  queue-listener
+        image:  davydrudenkoua/queue-listener:latest
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 100m
+            memory: 100Mi
+      imagePullSecrets:
+        - name: queue-listener-registry-secret
