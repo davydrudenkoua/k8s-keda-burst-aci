@@ -14,7 +14,7 @@ spec:
         app:  queue-listener
         azure.workload.identity/use: "true"
     spec:
-      serviceAccountName: {{SERVICE_ACCOUNT_NAME}}
+      serviceAccountName: queue-listener-sa
       containers:
       - name:  queue-listener
         image:  davydrudenkoua/queue-listener:latest

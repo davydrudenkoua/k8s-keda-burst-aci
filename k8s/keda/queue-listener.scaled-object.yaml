@@ -1,0 +1,27 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: queue-listener-sb-auth
+spec:
+  podIdentity:
+    provider: azure-workload
+    identityId: {{KEDA_USER_ASSIGNED_IDENTITY_CLIENT_ID}}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: queue-listener-sb-scaledobject
+spec:
+  scaleTargetRef:
+    name: queue-listener
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  cooldownPeriod: 5
+  triggers:
+  - type: azure-servicebus
+    metadata:
+      queueName: {{SCALING_QUEUE_NAME}}
+      namespace: {{SCALING_QUEUE_NAMESPACE}}
+      messageCount: "2"
+    authenticationRef:
+      name: queue-listener-sb-auth
