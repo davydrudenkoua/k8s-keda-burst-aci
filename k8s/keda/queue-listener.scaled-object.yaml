@@ -14,14 +14,14 @@ metadata:
 spec:
   scaleTargetRef:
     name: queue-listener
-  minReplicaCount: 1
-  maxReplicaCount: 3
-  cooldownPeriod: 5
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  cooldownPeriod: 15
   triggers:
   - type: azure-servicebus
     metadata:
       queueName: {{SCALING_QUEUE_NAME}}
       namespace: {{SCALING_QUEUE_NAMESPACE}}
-      messageCount: "2"
+      messageCount: "10"
     authenticationRef:
       name: queue-listener-sb-auth

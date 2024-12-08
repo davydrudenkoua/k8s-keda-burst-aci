@@ -1,5 +1,7 @@
 from azure.servicebus import ServiceBusClient
 from azure.identity import DefaultAzureCredential
+import time
+import os
 
 QUEUE_NAME = "scaling-queue"
 SERVICEBUS_NAMESPACE = "k8s-scaling-demo-sb-01.servicebus.windows.net"
@@ -10,7 +12,9 @@ def receive_messages():
                 print(f"Successfully connected to and listening for messages from queue {QUEUE_NAME}")
                 while True:
                      for message in queue_receiver.receive_messages(max_message_count=5, max_wait_time=5):
-                          print(f"Received new message #{message.sequence_number}: {str(message)}")
+                          print(f"Pod {os.getenv("HOSTNAME")} received new message #{message.sequence_number}: {str(message)}, beginning processing")
+                          time.sleep(5)
+                          print(f"Pod {os.getenv("HOSTNAME")} processed message #{message.sequence_number}")
                           queue_receiver.complete_message(message)
 
 if __name__ == "__main__":
