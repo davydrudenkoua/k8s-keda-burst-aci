@@ -1,39 +1,11 @@
-function Add-KedaUserIdentity {
-    param (
-        [Parameter(Mandatory)][string] $Subscription,
-        [Parameter(Mandatory)][string] $ResourceGroupName,
-        [Parameter(Mandatory)][string] $Location,
-        [Parameter(Mandatory)][string] $KedaUserAssignedIdentityName,
-        [Parameter(Mandatory)][string] $ServiceBusNamespace
-    )
-    az identity create `
-        --name $KedaUserAssignedIdentityName `
-        --resource-group $ResourceGroupName `
-        --location $Location
-
-    $UserAssignedIdentityClientId = $(az identity show --resource-group $ResourceGroupName --name $KedaUserAssignedIdentityName --query 'clientId' -o tsv)
-    $UserAssignedIdentityObjectId = $(az identity show --resource-group $ResourceGroupName --name $KedaUserAssignedIdentityName --query 'principalId' -o tsv)
-
-    $ServiceBusId = $(az servicebus namespace show --name $ServiceBusNamespace --resource-group $ResourceGroupName --query "id" -o tsv)
-    az role assignment create `
-        --assignee $UserAssignedIdentityClientId `
-        --role "Azure Service Bus Data Owner" `
-        --assignee-object-id $UserAssignedIdentityObjectId `
-        --scope $ServiceBusId
-
-    return  @{
-        ClientId = $UserAssignedIdentityClientId
-        TenantId = $(az identity show --resource-group $ResourceGroupName --name $KedaUserAssignedIdentityName --query 'tenantId' -otsv)
-    }
-}
-
-function Add-QueueScalerUserIdentity {
+function Add-UserIdentity {
     param (
         [Parameter(Mandatory)][string] $Subscription,
         [Parameter(Mandatory)][string] $ResourceGroupName,
         [Parameter(Mandatory)][string] $Location,
         [Parameter(Mandatory)][string] $UserAssignedIdentityName,
-        [Parameter(Mandatory)][string] $ServiceBusNamespace
+        [Parameter(Mandatory)][string] $ServiceBusNamespace,
+        [Parameter(Mandatory)][string] $ServiceBusRole
     )
     az identity create `
         --name $UserAssignedIdentityName `
@@ -41,18 +13,16 @@ function Add-QueueScalerUserIdentity {
         --location $Location
 
     $UserAssignedIdentityClientId = $(az identity show --resource-group $ResourceGroupName --name $UserAssignedIdentityName --query 'clientId' -o tsv)
-    $UserAssignedIdentityObjectId = $(az identity show --resource-group $ResourceGroupName --name $UserAssignedIdentityName --query 'principalId' -o tsv)
 
     $ServiceBusId = $(az servicebus namespace show --name $ServiceBusNamespace --resource-group $ResourceGroupName --query "id" -o tsv)
     az role assignment create `
         --assignee $UserAssignedIdentityClientId `
-        --role "Azure Service Bus Data Listener" `
-        --assignee-object-id $UserAssignedIdentityObjectId `
+        --role $ServiceBusRole `
         --scope $ServiceBusId
 
     return  @{
         ClientId = $UserAssignedIdentityClientId
-        TenantId = $(az identity show --resource-group $ResourceGroupName --name $KedaUserAssignedIdentityName --query 'tenantId' -otsv)
+        TenantId = $(az identity show --resource-group $ResourceGroupName --name $UserAssignedIdentityName --query 'tenantId' -otsv)
     }
 }
 
@@ -69,9 +39,14 @@ $Location = $(az group show --name $ResourceGroupName --query "location" -o tsv)
 $SubscriptionId = $(az account show --query "id" --output tsv)
 $ScalingQueueName ="scaling-queue"
 $ScalingQueueNamespace = "k8s-scaling-demo-sb-01"
+
+$DockerUsername = $Env:DOCKER_USERNAME
+$DockerPassword = $Env:DOCKER_PASSWORD
+$DockerServer = "https://index.docker.io/v1/"
 #endregion
 
 #region Creating AKS
+Write-Host "Creating AKS"
 az aks create `
         --resource-group $ResourceGroupName `
         --name $ClusterName `
@@ -86,24 +61,6 @@ az aks create `
 
 az aks get-credentials --name $ClusterName --resource-group $ResourceGroupName
 
-kubectl create secret docker-registry queue-listener-registry-secret `
-    --docker-server=https://index.docker.io/v1/ `
-    --docker-username=$Env:DOCKER_USERNAME `
-    --docker-password=$Env:DOCKER_PASSWORD
-
-kubectl create namespace "keda"
-#endregion
-
-#region Keda Identity
-$KedaIdentityParams = @{
-    Subscription = $SubscriptionId
-    ResourceGroupName = $ResourceGroupName
-    Location = $Location
-    KedaUserAssignedIdentityName = $KedaUserAssignedIdentityName
-    $ServiceBusNamespace = $ScalingQueueNamespace
-}
-$KedaUserAssignedIdentityValues = Add-KedaUserIdentity @KedaIdentityParams
-
 $AksOidcIssuer = $(
     az aks show `
         --name $ClusterName `
@@ -111,66 +68,86 @@ $AksOidcIssuer = $(
         --query "oidcIssuerProfile.issuerUrl" `
         -o tsv
     )
+Write-Host "AKS $ClusterName created and connected to kubectl"
+
+kubectl create secret docker-registry queue-listener-registry-secret `
+    --docker-server $DockerServer `
+    --docker-username $DockerUsername `
+    --docker-password $DockerPassword
+
+Write-Host "secret for pulling queue-listener image created"
+#endregion
+
+#region Keda Identity
+Write-Host "Creating user-assigned keda identity"
+$KedaIdentityParams = @{
+    Subscription = $SubscriptionId
+    ResourceGroupName = $ResourceGroupName
+    Location = $Location
+    UserAssignedIdentityName = $KedaUserAssignedIdentityName
+    ServiceBusNamespace = $ScalingQueueNamespace
+    ServiceBusRole = "Azure Service Bus Data Owner"
+}
+$KedaUserAssignedIdentityValues = Add-UserIdentity @KedaIdentityParams
 
 az identity federated-credential create `
 --name $KedaFederatedIdentityName `
 --identity-name $KedaUserAssignedIdentityName `
 --resource-group $ResourceGroupName `
 --issuer $AksOidcIssuer `
---subject system:serviceaccount:keda:$KedaServiceAccountName `
+--subject system:serviceaccount:kube-system:keda-operator `
 --audience api://AzureADTokenExchange
+Write-Host "User-assigned keda identity created"
 #endregion
 
 #region Queue Listener Identity
+Write-Host "Creating user-assigned queue-listener identity"
 $QueueListenerIdentityParams = @{
     Subscription = $SubscriptionId
     ResourceGroupName = $ResourceGroupName
     Location = $Location
     UserAssignedIdentityName = $QueueListenerUserAssignedIdentityName
-    $ServiceBusNamespace = $ScalingQueueNamespace
+    ServiceBusNamespace = $ScalingQueueNamespace
+    ServiceBusRole = "Azure Service Bus Data Receiver"
 }
-$QueueListenerUserAssignedIdentityValues = Add-QueueScalerUserIdentity @QueueListenerIdentityParams
+$QueueListenerUserAssignedIdentityValues = Add-UserIdentity @QueueListenerIdentityParams
 
 az identity federated-credential create `
     --name $QueueListenerFederatedIdentityName `
     --identity-name $QueueListenerUserAssignedIdentityName `
     --resource-group $ResourceGroupName `
     --issuer $AksOidcIssuer `
-    --subject system:serviceaccount:keda:$QueueListenerServiceAccountName `
+    --subject system:serviceaccount:default:$QueueListenerServiceAccountName `
     --audience api://AzureADTokenExchange
+Write-Host "User-assigned queue-listener identity created"
 #endregion
 
 #region Service Accounts
+Write-Host "Creating queue-listener service account"
 $QueueListenerServiceAccountTemplate = Get-Content -Path "k8s/service-accounts/queue-listener.service-account.yaml" -Raw
-$QueueListenerServiceAccountTemplate = $QueueListenerServiceAccountTemplate -replace "{{QUEUE_LISTENER_USER_ASSIGNED_CLIENT_ID}}", $QueueListenerUserAssignedIdentityValues.ClientId
-$KedaServiceAccountTemplate | kubectl apply -f
+$QueueListenerServiceAccountTemplate = $QueueListenerServiceAccountTemplate -replace `
+    "{{QUEUE_LISTENER_USER_ASSIGNED_CLIENT_ID}}", $QueueListenerUserAssignedIdentityValues.ClientId
 
-
-$KedaServiceAccountTemplate = Get-Content -Path "k8s/service-accounts/keda.service-account.yaml" -Raw
-$KedaServiceAccountTemplate = $KedaServiceAccountTemplate -replace "{{KEDA_USER_ASSIGNED_CLIENT_ID}}", $KedaUserAssignedIdentityValues.ClientId
-$KedaServiceAccountTemplate | kubectl apply -n "keda" -f
+$QueueListenerServiceAccountTemplate | kubectl apply -f -
+Write-Host "Queue-listener service account created"
 #endregion
 
-#region Queue Listener Deployment
+#region Restarting keda-operator to enable workload identity
+kubectl rollout restart deploy keda-operator -n kube-system
+#endregion
+
+#region queue-listener Deployment
+Write-Host "Creating queue-listener deployment"
 kubectl apply -f "k8s/deployments/queue-listener.deployment.yaml"
-#endregion
-
-#region Install Keda
-helm repo add kedacore
-helm repo update
-
-helm install keda "kedacore/keda" --namespace "keda" `
-    --set serviceAccount.create=false `
-    --set serviceAccount.name=keda-operator `
-    --set podIdentity.azureWorkload.enabled=true `
-    --set podIdentity.azureWorkload.clientId=$KedaUserAssignedIdentityValues.ClientId `
-    --set podIdentity.azureWorkload.tenantId=$KedaUserAssignedIdentityValues.TenantId
+Write-Host "Queue-listener deployment created"
 #endregion
 
 #region Scaled Object
+Write-Host "Deploying queue-listener scaled object"
 $ScaledObjectAccountTemplate = Get-Content -Path "k8s/keda/queue-listener.scaled-object.yaml" -Raw
 $ScaledObjectAccountTemplate = $ScaledObjectAccountTemplate -replace "{{KEDA_USER_ASSIGNED_IDENTITY_CLIENT_ID}}", $KedaUserAssignedIdentityValues.ClientId
 $ScaledObjectAccountTemplate = $ScaledObjectAccountTemplate -replace "{{SCALING_QUEUE_NAME}}", $ScalingQueueName
 $ScaledObjectAccountTemplate = $ScaledObjectAccountTemplate -replace "{{SCALING_QUEUE_NAMESPACE}}", $ScalingQueueNamespace
-$ScaledObjectAccountTemplate | kubectl apply -n "keda" -f
+$ScaledObjectAccountTemplate | kubectl apply -f -
+Write-Host "Queue-listener scaled object created"
 #endregion

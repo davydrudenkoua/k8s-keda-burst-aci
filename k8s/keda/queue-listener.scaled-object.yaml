@@ -15,7 +15,7 @@ spec:
   scaleTargetRef:
     name: queue-listener
   minReplicaCount: 1
-  maxReplicaCount: 10
+  maxReplicaCount: 3
   cooldownPeriod: 5
   triggers:
   - type: azure-servicebus
