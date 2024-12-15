@@ -56,8 +56,15 @@ az aks create `
         --generate-ssh-keys `
         --location $Location `
         --node-vm-size "Standard_B2s" `
+        --tier "free" `
+        --enable-cluster-autoscaler `
         --node-count 1 `
-        --tier "free"
+        --min-count 1 `
+        --max-count 2 `
+        --cluster-autoscaler-profile scan-interval=30s,max-graceful-termination-sec=30, `
+            max-node-provision-time=10m,new-pod-scale-up-delay=30s, `
+            scale-down-utilization-threshold=0.7, `
+            scale-down-unneeded-time=1m
 
 az aks get-credentials --name $ClusterName --resource-group $ResourceGroupName
 

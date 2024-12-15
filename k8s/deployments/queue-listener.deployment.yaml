@@ -20,10 +20,10 @@ spec:
         image:  davydrudenkoua/queue-listener:latest
         resources:
           requests:
-            cpu: 100m
-            memory: 100Mi
+            cpu: 300m
+            memory: 300Mi
           limits:
-            cpu: 100m
-            memory: 100Mi
+            cpu: 300m
+            memory: 300Mi
       imagePullSecrets:
         - name: queue-listener-registry-secret
