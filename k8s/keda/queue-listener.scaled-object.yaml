@@ -23,5 +23,6 @@ spec:
       queueName: {{SCALING_QUEUE_NAME}}
       namespace: {{SCALING_QUEUE_NAMESPACE}}
       messageCount: "10"
+      activationMessageCount: "0"
     authenticationRef:
       name: queue-listener-sb-auth
