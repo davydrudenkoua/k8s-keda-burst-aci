@@ -62,7 +62,7 @@ az aks create `
         --min-count 1 `
         --max-count 2 `
         --cluster-autoscaler-profile scan-interval=30s,max-graceful-termination-sec=30, `
-            max-node-provision-time=10m,new-pod-scale-up-delay=30s, `
+            max-node-provision-time=15m,new-pod-scale-up-delay=10s, `
             scale-down-utilization-threshold=0.7, `
             scale-down-unneeded-time=1m
 
